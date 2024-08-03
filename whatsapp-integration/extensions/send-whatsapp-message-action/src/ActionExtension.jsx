@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {
   reactExtension,
   useApi,
+  useNavigate,
   AdminAction,
   BlockStack,
   Button,
@@ -16,9 +17,8 @@ export default reactExtension(TARGET, () => <App />);
 
 function App() {
 
-  const [message, setMessage] = useState('');
-  let orderNumber = "";
-  let phoneNumber = "";
+  const [warequest, setWARequest] = useState('');
+  const [adminMessage, setAdminMessage] = useState("Loading...");
 
   // The useApi hook provides access to several useful APIs like i18n, close, and data.
   const {i18n, close, data} = useApi(TARGET);
@@ -32,22 +32,35 @@ function App() {
         query: `query Order($id: ID!) {
           order(id: $id) {
             name
-	      customer {
-			phone
-		}
-		displayAddress {
-			phone
-		}
-		billingAddress {
-			phone	
-		}
-		shippingAddress {
-			phone	
-		}
-          }
-        }`,
-        variables: {id: data.selected[0].id},
-      };
+            lineItems(first:20) {
+            	nodes {
+            		name
+            	}
+            }
+            requiresShipping
+            fullyPaid
+            customer {
+			      	phone
+			      }
+			      displayAddress {
+			      	phone
+			      }
+			      billingAddress {
+			      	phone
+			      }
+			      shippingAddress {
+			      	name
+			      	company
+			      	address1
+			      	address2
+			      	country
+			      	zip
+			      	phone
+			      }
+			    }
+			  }`,
+	  		variables: {id: data.selected[0].id},
+			};
 
       const res = await fetch("shopify:admin/api/graphql.json", {
         method: "POST",
@@ -58,80 +71,113 @@ function App() {
         console.error('Network error');
       }
 
-	// get order details
-	console.log("Getting order data...");
-      const orderResult = await res.json();
-	console.log(orderResult);
+      // get order details
+			console.log("Getting order details...");
+      const orderDetails = await res.json();
+			console.log(orderDetails);
 
-	// set order number
-	orderNumber = orderResult.data.order.name;
+			// get order number, (order number is non-null)
+			let orderNumber = orderDetails.data.order.name;
 	
-	// set phone number
-	if (orderResult.data.order.customer.phone) {
-		phoneNumber = orderResult.data.order.customer.phone;
-		console.log("Using Phone Number from Contact Information...");
-	} else if (orderResult.data.order.displayAddress.phone) {
-		phoneNumber = orderResult.data.order.displayAddress.phone;
-		console.log("Using Phone Number from Primary Address...");
-	} else if (orderResult.data.order.billingAddress.phone) {
-		phoneNumber = orderResult.data.order.billingAddress.phone;
-		console.log("Using Phone Number from Billing Address...");
-	} else if (orderResult.data.order.shippingAddress.phone) {
-		phoneNumber = orderResult.data.order.shippingAddress.phone;
-		console.log("Using Phone Number from Shipping Address...");
-	}
+			// get phone number
+  		let phoneNumber = "";
+			if (orderDetails.data.order.customer.phone) {
+				phoneNumber = orderDetails.data.order.customer.phone;
+				console.log("Using Phone Number from Contact Information: " + phoneNumber);
+			} else if (orderDetails.data.order.displayAddress.phone) {
+				phoneNumber = orderDetails.data.order.displayAddress.phone;
+				console.log("Using Phone Number from Primary Address:" + phoneNumber);
+			} else if (orderDetails.data.order.billingAddress.phone) {
+				phoneNumber = orderDetails.data.order.billingAddress.phone;
+				console.log("Using Phone Number from Billing Address:" + phoneNumber);
+			} else if (orderDetails.data.order.shippingAddress.phone) {
+				phoneNumber = orderDetails.data.order.shippingAddress.phone;
+				console.log("Using Phone Number from Shipping Address:" + phoneNumber);
+			}
+			// clean up phone number
+			if (!phoneNumber) {
+				console.error('No Phone Number Available.');
+			} else {
+				// remove whitespaces
+				phoneNumber = phoneNumber.trim();
 
-       if (!phoneNumber) {
-		console.error('No Phone Number Available.');
-	} else {
-		// remove whitespaces
-		phoneNumber = phoneNumber.trim();
+				// remove plus sign
+				phoneNumber = phoneNumber.trim("+", 0);
+			}
 
-		// remove plus sign
-		phoneNumber = phoneNumber.trim("+", 0);
-		
-		// add country code if missing
-		//if (! phoneNumber.startsWith("+65")) {
-		//	phoneNumber = "+65" + phoneNumber;
-		//}
-	}
+			// check if order requires shipping
+			let requiresShipping = orderDetails.data.order.requiresShipping;
+			console.log("Order requires shipping? " + requiresShipping);
 
-	let msg = "https://api.whatsapp.com/send/?&type=phone_number&app_absent=0&phone=91089852&text=Hello";// + phoneNumber;
-	console.log(msg);
-	setMessage(msg);
-	
+			// check if order is fully paid
+			let isFullyPaid = orderDetails.data.order.fullyPaid;
+			console.log("Order fully paid? " + isFullyPaid);
+
+			/* START - construct WhatsApp Message to send */
+			let message = "Hi from Ani Mecha here, we have an update for your order "+ orderNumber + ":\n";
+			// add product names
+			if (orderDetails.data.order.lineItems && orderDetails.data.order.lineItems.nodes) {
+				let products = orderDetails.data.order.lineItems.nodes;
+				for (product of products) {
+					if (product.name) {
+						if (product.name.startsWith("Prepaid")) {
+							continue;
+						}
+						message += "- " + product.name + "\n";
+					}
+				}
+			} else {
+				console.error("No products found!");
+			}
+			message += "\n";
+			// add pick up or delivery message
+			if (!requiresShipping) {
+				message += "The above items are ready for collection, appreciate it if you can collect within 2 weeks' time.";
+			} else {
+				if (isFullyPaid) {
+					message += "The above items are ready for delivery.";
+				} else {
+					message += "The above items are ready for delivery, and we have sent you an invoice.";
+				}
+				message += "\n\n";
+				message += "Just to confirm, is the following delivery address correct?\n\n";
+
+				// add address
+				let address = orderDetails.data.order.shippingAddress;
+				if (address) {
+					if (address.name) message += address.name + "\n";
+					if (address.company) message += address.company + "\n";
+					if (address.address1) message += address.address1 + "\n";
+					if (address.address2) message += address.address2 + "\n";
+					if (address.country && address.zip) message += address.country + " " + address.zip;
+				}
+			}
+			console.log("WhatsApp Message to send:\n" + message);
+			setAdminMessage(message);
+
+			// construct whatsapp request
+			let warequest = "https://api.whatsapp.com/send/?&type=phone_number&app_absent=0";
+			warequest += "&phone=" + phoneNumber;
+			warequest += "&text=" + encodeURIComponent(message);
+			console.log(warequest);
+			setWARequest(warequest);
     })();
   }, [data.selected]);
   return (
     // The AdminAction component provides an API for setting the title and actions of the Action extension wrapper.
     <AdminAction
       primaryAction={
-	 <Link href={message}>
-        <Button
-          onPress={() => {
-	     console.log("sending WA message...");
-            close();
-            }}
-        >
-          Done
-        </Button>
-	 </Link>
-      }
-      secondaryAction={
-        <Button
-          onPress={() => {
-            console.log('closing');
-            close();
-          }}
-        >
-          Close
-        </Button>
+	        <Button href={warequest}
+	          onPress={() => {
+	            close();
+	          }}
+	        >Send WhatsApp Message
+	        </Button>
       }
     >
       <BlockStack>
         {/* Set the translation values for each supported language in the locales directory */}
-        <Text fontWeight="bold">{i18n.translate('welcome', {TARGET})}</Text>
-        <Text>Order Number: {orderNumber}</Text>
+        <Text>{adminMessage}</Text>
       </BlockStack>
     </AdminAction>
   );

@@ -2,7 +2,6 @@ import {useEffect, useState} from 'react';
 import {
   reactExtension,
   useApi,
-  useNavigate,
   AdminAction,
   BlockStack,
   Button,
@@ -37,7 +36,6 @@ function App() {
             		name
             	}
             }
-            requiresShipping
             fullyPaid
             customer {
 			      	phone
@@ -99,14 +97,30 @@ function App() {
 				console.error('No Phone Number Available.');
 			} else {
 				// remove whitespaces
-				phoneNumber = phoneNumber.trim();
+				phoneNumber = phoneNumber.replace(/\s+/g,'');
 
 				// remove plus sign
-				phoneNumber = phoneNumber.trim("+", 0);
+				if (phoneNumber.charAt(0) === "+") {
+				  phoneNumber = phoneNumber.substring(1);
+				}
+
+				// add 65 if there's no country code
+				if (phoneNumber.length === 8) {
+					phoneNumber = "65" + phoneNumber;
+				}
 			}
 
-			// check if order requires shipping
-			let requiresShipping = orderDetails.data.order.requiresShipping;
+			// construct delivery address; use it to determine if it requires shipping
+			let shippingAddress = "";
+			let address = orderDetails.data.order.shippingAddress;
+			if (address) {
+				if (address.name) shippingAddress += address.name + "\n";
+				if (address.company) shippingAddress += address.company + "\n";
+				if (address.address1) shippingAddress += address.address1 + "\n";
+				if (address.address2) shippingAddress += address.address2 + "\n";
+				if (address.country && address.zip) shippingAddress += address.country + " " + address.zip;
+			}
+			let requiresShipping = shippingAddress !== "";
 			console.log("Order requires shipping? " + requiresShipping);
 
 			// check if order is fully paid
@@ -140,17 +154,7 @@ function App() {
 					message += "The above items are ready for delivery, and we have sent you an invoice.";
 				}
 				message += "\n\n";
-				message += "Just to confirm, is the following delivery address correct?\n\n";
-
-				// add address
-				let address = orderDetails.data.order.shippingAddress;
-				if (address) {
-					if (address.name) message += address.name + "\n";
-					if (address.company) message += address.company + "\n";
-					if (address.address1) message += address.address1 + "\n";
-					if (address.address2) message += address.address2 + "\n";
-					if (address.country && address.zip) message += address.country + " " + address.zip;
-				}
+				message += "Just to confirm, is the following delivery address correct?\n\n" + shippingAddress;
 			}
 			console.log("WhatsApp Message to send:\n" + message);
 			setAdminMessage(message);

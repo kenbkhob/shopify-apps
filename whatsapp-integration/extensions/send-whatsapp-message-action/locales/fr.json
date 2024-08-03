@@ -1,0 +1,4 @@
+{
+  "name": "send-whatsapp-message-action",
+  "welcome": "Bienvenue dans l'extension {{TARGET}}!"
+}
